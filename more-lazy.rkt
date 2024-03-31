@@ -1,3 +1,4 @@
+;Andrew Coale
 #lang plait
 
 (define-type Value
@@ -66,7 +67,7 @@
      (lamE (s-exp->symbol (first (s-exp->list 
                                   (second (s-exp->list s)))))
            (parse (third (s-exp->list s))))]
-    [(s-exp-match? `{if0 ANY ANY ANY} s)      ;
+    [(s-exp-match? `{if0 ANY ANY ANY} s)      ; extended parse to include if0 and pair functions
      (if0E (parse (second (s-exp->list s)))   ;
            (parse (third (s-exp->list s)))    ;
            (parse (fourth (s-exp->list s))))] ;
@@ -122,18 +123,18 @@
                                       (bind n (delay arg env (box (none))))
                                       c-env))]
                       [else (error 'interp "not a function")])]
-    [(if0E tst thn els)                       ; may not be fully implemented yet
+    [(if0E tst thn els)                       ; extended interp to lazily evaluate if0 and pair functions
      (interp (if (num-zero? (interp tst env)) ;
                  thn                          ;
                  els) env)]                   ;
     [(pairE frst scnd)                      ;
      (pairV (delay frst env (box (none)))   ;
             (delay scnd env (box (none))))] ;
-    [(fstE pr) (type-case Exp pr                       ;
-                 [(pairE frst scnd) (interp frst env)] ; should use force
-                 [else (error 'interp "not a pair")])] ;
-    [(sndE pr) (type-case Exp pr                         ;
-                 [(pairE frst scnd) (interp scnd env)]   ; should also use force
+    [(fstE pr) (type-case Value (interp pr env)   ;
+                 [(pairV frst scnd) (force frst)] ; 
+                 [else (error 'interp "not a pair")])]   ;
+    [(sndE pr) (type-case Value (interp pr env)          ;
+                 [(pairV frst scnd) (force scnd)]        ; 
                  [else (error 'interp "not a pair")])])) ;
 
 (define (interp-expr [a : Exp]) : S-Exp ;
@@ -273,3 +274,46 @@
                     (bind 'x (delay (numE 9) mt-env (box (none))))
                     (extend-env (bind 'y (delay (numE 8) mt-env (box (none)))) mt-env)))
         (delay (numE 8) mt-env (box (none)))))
+
+(module+ test
+  (test (interp-expr (parse `{fst {pair 3 {+ 1 {lambda {y} y}}}}))
+        `3)
+  (test (interp-expr (parse `{snd {pair {+ 1 {lambda {y} y}} 4}}))
+        `4)
+  (test/exn (interp-expr (parse `(fst 1)))
+            "not a pair")
+  (test/exn (interp-expr (parse `(snd 1)))
+            "not a pair")
+  (test (interp-expr (parse `{lambda {x} 1}))
+        `function)
+  (test (interp-expr (parse `{pair 1 2}))
+        `pair)
+  (test/exn (interp-expr (parse `{if0 (pair 1 2) 3 4}))
+            "not a number")
+  (test (interp-expr
+         (parse
+          `{let {[mkrec
+                  {lambda {body-proc}
+                    {let {[fX {lambda {fX}
+                                {body-proc {fX fX}}}]}
+                      {fX fX}}}]}
+             {let {[nats-to
+                    {mkrec
+                     {lambda {nats-to}
+                       {lambda {n}
+                         {if0 n
+                              {pair 0 0}
+                              {let {[l {nats-to {+ n -1}}]}
+                                {pair {+ {fst l} 1}
+                                      l}}}}}}]}
+               {let {[sum
+                      {mkrec
+                       {lambda {sum}
+                         {lambda {n}
+                           {lambda {l}
+                             {if0 n
+                                  0
+                                  {+ {fst l}
+                                     {{sum {+ n -1}} {snd l}}}}}}}}]}
+                 {{sum 10000} {nats-to 10000}}}}}))
+        `50005000))
